@@ -35,6 +35,11 @@ cursor.execute("""CREATE TABLE IF NOT EXISTS bouqets (
     bouqet_description TEXT DEFAULT 'Не указано',
     bouqet_price TEXT DEFAULT 'Не указана')""")
 
+cursor.execute("""CREATE TABLE IF NOT EXISTS basket (
+    id SERIAL PRIMARY KEY,
+    bouqet_id INTEGER, 
+    user_id TEXT)""")
+
 # cursor.execute("""INSERT INTO roles (role) VALUES ('Пользователь'), ('Флорист'), ('Администратор')""")
 conn.commit()
 cursor.close()

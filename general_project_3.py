@@ -33,6 +33,7 @@ wait_message = False
 wait_message_add = False
 download_photo = False
 user_info = {}
+current_bouqet_id = 0
 
 back_to_start_button = InlineKeyboardButton("Назад", callback_data="back_to_start")
 # back_to_changes_button = InlineKeyboardButton('Назад', callback_data='back_to_change')
@@ -52,7 +53,24 @@ sql_request_b = ['bouqet_name', 'bouqet_photo', 'bouqet_description', 'bouqet_pr
 answer_b = ['Название букета успешно изменено', 'Фото букета успешно изменено', 'Описание букета успешно изменено',
             'Цена букета успешно изменена']
 request_b = ['название букета', 'фото букета', 'описание букета', 'цену букета']
-
+order_button = InlineKeyboardButton("Заказать", callback_data="send_order")
+message_types = [
+    "text",
+    "document",
+    "photo",
+    "audio",
+    "video",
+    "voice",
+    "video_note",
+    "sticker",
+    "location",
+    "contact",
+    "animation",
+    "invoice",
+    "chat_invite_link",
+    "shipping_query",
+    "pre_checkout_query"
+]
 
 # СОЗДАНИЕ КЛАВИАТУР
 for i in profile_button_texts:
@@ -70,7 +88,9 @@ bouqets_keyboard = InlineKeyboardMarkup(b_keyboard)
 forward = InlineKeyboardButton("->", callback_data='forward')
 back = InlineKeyboardButton("<-", callback_data='back')
 choose = InlineKeyboardButton("В корзину", callback_data="choose")
-bck_to_start = InlineKeyboardButton("Назад", callback_data='back_to_start')
+
+
+# bck_to_start = InlineKeyboardButton("Назад", callback_data='back_to_start')
 
 
 # ПРОВЕРКА ВАЛИДНОСТИ
@@ -80,15 +100,13 @@ def is_valid_email(email):
 
 
 def is_valid_name(name):
-    # Проверка на использование только букв и длины
     if re.match("^[а-яА-ЯёЁa-zA-Z]+$", name) and 1 <= len(name) <= 50:
         return True
     return False
 
 
 def is_valid_phone_number(phone_number):
-    # Регулярное выражение для проверки номера телефона
-    pattern = r'^(?:\+7|8)[0-9]{10}$'  # Формат: +7 или 8, затем 10 цифр
+    pattern = r'^(?:\+7|8)[0-9]{10}$'
     return bool(re.match(pattern, phone_number))
 
 
@@ -98,12 +116,55 @@ def return_bouqet_text(spisok):
 
 def create_new_bouqet():
     return {'bouqet_name': 'Не указано', 'bouqet_photo': ['Не добавлено'], 'bouqet_description': 'Не указано',
-                  'bouqet_price': 'Не указана', 'ready': True}
+            'bouqet_price': 'Не указана', 'ready': True}
+
 
 def return_text_about_bouqet(sp):
     text = f'''Название букета: {sp[1]}\n\nОписание букета: {sp[3]}\n\nСтоимость букета: {sp[4]} р.'''
     photo = 'data/' + sp[2]
     return [text, photo]
+
+
+def return_first(a):
+    return a[0]
+
+
+def bouqet_id(a):
+    return a[1]
+
+
+def basket_text(sp):
+    text_for_basket = '🛒Корзина\n\n🌷Букеты:\n\n'
+    bouqets_ids = list(map(bouqet_id, sp))
+    cur.execute(f"""SELECT * FROM bouqets WHERE id IN %s""", (tuple(bouqets_ids),))
+    bouqets_ids = cur.fetchall()
+    counter = 1
+    summa = 0
+    for el in bouqets_ids:
+        summa += int(el[4])
+        pr = len(str(counter)) + 3
+        el_txt = list(el[1:2] + el[3:])
+        text_for_basket += f'''{counter}. Название букета: {el_txt[0]}\n{' ' * pr}Описание букета: {el_txt[1]}\n{' ' * pr}Стоимость букета: {el_txt[2]} р. \n\n'''
+        counter += 1
+    text_for_basket += f'Итого: {summa}'
+    return text_for_basket
+
+
+def order_text(sp, username):
+    text = f'''Новый заказ!\n\nПользователь: @{username}\n\nЗаказ:\n\n'''
+    bouqets_ids = list(map(bouqet_id, sp))
+    cur.execute(f"""SELECT * FROM bouqets WHERE id IN %s""", (tuple(bouqets_ids),))
+    bouqets_ids = cur.fetchall()
+    summa = 0
+    counter = 1
+    for el in bouqets_ids:
+        summa += int(el[4])
+        pr = len(str(counter)) + 3
+        el_txt = list(el[1:2] + el[3:])
+        text += f'''{counter}. Название букета: {el_txt[0]}\n{' ' * pr}Описание букета: {el_txt[1]}\n{' ' * pr}Стоимость букета: {el_txt[2]} р. \n\n'''
+        counter += 1
+    text += f'Итого: {summa}'
+    return text
 
 
 # НАЧАЛЬНОЕ СООБЩЕНИЕ
@@ -112,6 +173,7 @@ def start(message):
     cur.execute(f"""INSERT INTO users (user_id) VALUES ({message.chat.id}) ON CONFLICT (user_id) DO NOTHING;""")
     cur.execute('''SELECT role FROM users WHERE user_id = %s''', (message.chat.id,))
     role = cur.fetchone()[0]
+    print(message.chat.id)
     button1 = InlineKeyboardButton("Готовые букеты", callback_data='bouquets')
     button2 = InlineKeyboardButton("Корзина", callback_data='basket')
     button3 = InlineKeyboardButton("Профиль", callback_data='profile')
@@ -128,19 +190,19 @@ def start(message):
 # ОТКРЫТИЕ ВИТРИНЫ С БУКЕТАМИ
 @bot.callback_query_handler(func=lambda call: call.data in ['bouquets'])
 def handle_first_buttons(call):
-    global bouqets, role
+    global bouqets, role, current_bouqet_id
     cur.execute('''SELECT role FROM users WHERE user_id = %s''', (call.message.chat.id,))
     role = cur.fetchone()[0]
     cur.execute('''SELECT * FROM bouqets''')
     bouqets = cur.fetchall()
-    print(bouqets)
     bot.delete_message(call.message.chat.id, call.message.message_id)
     click_count[call.message.chat.id] = 0
     if bouqets:
         info = return_text_about_bouqet(bouqets[click_count[call.message.chat.id]])
-        pages_info_button = InlineKeyboardButton(f"{click_count[call.message.chat.id] + 1}/{len(bouqets)}",
-                                                 callback_data='stranica')
-        showcase_keyboard = [[back, pages_info_button, choose, forward], [bck_to_start]]
+        current_bouqet_id = bouqets[click_count[call.message.chat.id]][0]
+        # pages_info_button = InlineKeyboardButton(f"{click_count[call.message.chat.id] + 1}/{len(bouqets)}",
+        #                                          callback_data='stranica')
+        showcase_keyboard = [[back, choose, forward], [back_to_start_button]]
         if role in [2, 3]:
             showcase_keyboard.append([delete_bouqet_button])
         new_keyboard = InlineKeyboardMarkup(showcase_keyboard)
@@ -148,7 +210,23 @@ def handle_first_buttons(call):
             bot.send_photo(call.message.chat.id, caption=info[0], photo=photo, reply_markup=new_keyboard)
     else:
         keyboard = InlineKeyboardMarkup([[back_to_start_button]])
-        bot.send_message(chat_id=call.message.chat.id, text='Витрина пока что пуста, приходите позже :)', reply_markup=keyboard)
+        bot.send_message(chat_id=call.message.chat.id, text='Витрина пока что пуста, приходите позже :)',
+                         reply_markup=keyboard)
+
+
+# УДАЛЕНИЕ БУКЕТА С ВИТРИНЫ
+
+@bot.callback_query_handler(func=lambda call: call.data in ['delete_bouqet'])
+def delete_bouqet_fn(call):
+    bot.delete_message(call.message.chat.id, call.message.message_id)
+    start(call.message)
+    cur.execute(f"""SELECT bouqet_photo FROM bouqets WHERE id = {current_bouqet_id}""")
+    file_name = str(map(return_first, cur.fetchone()))
+    file_path = os.path.join('data', file_name + '.jpg')
+    if os.path.isfile(file_path):
+        os.remove(file_path)
+    cur.execute(f"""DELETE FROM bouqets WHERE id = {current_bouqet_id}""")
+    conn.commit()
 
 
 # ОТКРЫТИЕ ПРОФИЛЯ ПОЛЬЗОВАТЕЛЯ
@@ -164,6 +242,23 @@ def profile_open(call):
     msg = bot.send_message(call.message.chat.id, profile_text, reply_markup=profile_keyboard)
     profile_message_data[call.message.chat.id] = []
     profile_message_data[call.message.chat.id].append(msg.message_id)
+
+
+# ДОБАВЛЕНИЕ БУКЕТА В КОРЗИНУ
+@bot.callback_query_handler(func=lambda call: call.data in ['choose'])
+def add_to_basket(call):
+    bouqet_id = bouqets[click_count[call.message.chat.id]][0]
+    user_id = call.message.from_user.id
+    cur.execute(f"""SELECT bouqet_id FROM basket WHERE user_id = '{user_id}'""")
+    bouqets_id = list(map(return_first, cur.fetchall()))
+    if bouqet_id not in bouqets_id:
+        cur.execute(f"""INSERT INTO basket (bouqet_id, user_id) VALUES ({bouqet_id}, '{user_id}')""")
+        conn.commit()
+        msg = bot.send_message(call.message.chat.id, text='Букет успешно добавлен в корзину!')
+        time.sleep(2)
+        bot.delete_message(call.message.chat.id, message_id=msg.message_id)
+    else:
+        pass
 
 
 # ФУНКЦИОНАЛ СМЕНЫ ЛИЧНЫХ ДАННЫХ
@@ -270,7 +365,6 @@ def save_bouqet(call):
     conn.commit()
     new_bouqet = create_new_bouqet()
     ans = bot.send_message(call.message.chat.id, 'Данные успешно сохранены')
-    print(add_bouqets_message_data[call.message.chat.id])
     time.sleep(2)
     bot.delete_message(call.message.chat.id, ans.message_id)
     temporary_data = []
@@ -283,7 +377,7 @@ def save_bouqet(call):
 # ПЕРЕЛИСТЫВАНИЕ ВИТРИНЫ (ВПЕРЕД/НАЗАД)
 @bot.callback_query_handler(func=lambda call: call.data in ['forward', 'back'])
 def forward_back_buttons(call):
-    global bouqets, click_count, role
+    global bouqets, click_count, role, current_bouqet_id
     edit = False
     if call.data == 'forward' and click_count[call.message.chat.id] < len(bouqets) - 1:
         click_count[call.message.chat.id] += 1
@@ -292,28 +386,43 @@ def forward_back_buttons(call):
         click_count[call.message.chat.id] -= 1
         edit = True
     if edit:
-        pages_info_button = InlineKeyboardButton(f"{click_count[call.message.chat.id] + 1}/{len(bouqets)}", callback_data='stranica')
-        showcase_keyboard = [[back, pages_info_button, choose, forward], [bck_to_start]]
+        # pages_info_button = InlineKeyboardButton(f"{click_count[call.message.chat.id] + 1}/{len(bouqets)}",
+        #                                          callback_data='stranica')
+        showcase_keyboard = [[back, choose, forward], [back_to_start_button]]
         if role in [2, 3]:
             showcase_keyboard.append([delete_bouqet_button])
         new_keyboard = InlineKeyboardMarkup(showcase_keyboard)
         info = return_text_about_bouqet(bouqets[click_count[call.message.chat.id]])
-        # bot.edit_message_reply_markup(chat_id=call.message.chat.id,
-        #                               message_id=call.message.message_id,
-        #                               reply_markup=new_keyboard)
+        current_bouqet_id = bouqets[click_count[call.message.chat.id]][0]
         with open(info[1], 'rb') as new_photo:
-            bot.edit_message_media(media=InputMediaPhoto(new_photo, caption=info[0]), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=new_keyboard)
+            bot.edit_message_media(media=InputMediaPhoto(new_photo, caption=info[0]), chat_id=call.message.chat.id,
+                                   message_id=call.message.message_id, reply_markup=new_keyboard)
         edit = False
+
 
 # ОТКРЫТИЕ КОРЗИНЫ
 @bot.callback_query_handler(func=lambda call: call.data in ['basket'])
 def open_basket(call):
     bot.delete_message(call.message.chat.id, call.message.message_id)
-    back_to_start_button = InlineKeyboardButton("Назад", callback_data="back_to_start")
-    keyboard = [[back_to_start_button]]
-    new_keyboard = InlineKeyboardMarkup(keyboard)
-    profile_text = "Это корзина\nВсё хорошо"
-    bot.send_message(call.message.chat.id, profile_text, reply_markup=new_keyboard)
+    keyboard = [[order_button], [back_to_start_button]]
+    new_keyboard_1 = InlineKeyboardMarkup(keyboard)
+    cur.execute(f"""SELECT * FROM basket WHERE user_id = '{call.message.from_user.id}'""")
+    bouqs = cur.fetchall()
+    profile_text = basket_text(bouqs)
+    bot.send_message(call.message.chat.id, profile_text, reply_markup=new_keyboard_1)
+
+
+@bot.callback_query_handler(func=lambda call: call.data in ['send_order'])
+def send_order_function(call):
+    cur.execute(f"""SELECT * FROM basket WHERE user_id = '{call.message.from_user.id}'""")
+    bouqs = cur.fetchall()
+    message_text = order_text(bouqs, call.message.chat.username)
+    if bouqs:
+        print(1)
+        print(call)
+        msg = bot.send_message(admin[0], 'У Вас новый заказ!')
+        time.sleep(10)
+        bot.delete_message(admin[0], message_id=msg.message_id)
 
 
 # ДОБАВЛЕНИЕ НОВОГО БУКЕТА
@@ -413,12 +522,29 @@ def save_photo(*file_info):
 
 
 # УДАЛЕНИЕ ЛЮБЫХ СООБЩЕНИЙ, КОТОРЫЕ НЕ ЖДАЛ БОТ
-@bot.message_handler(func=lambda message: True)
+@bot.message_handler(content_types=message_types)
 def echo_message(message):
+    print(message.message_id)
     global wait_message, download_photo
-    if not wait_message and download_photo or wait_message and not download_photo or not wait_message and not download_photo:
+    if not wait_message and not download_photo:
         bot.delete_message(chat_id=message.chat.id, message_id=message.id)
 
+
+# @bot.message_handler(content_types=['sticker'])
+# def handle_stickers(message):
+#     echo_message(message)
+
+
+# @bot.message_handler(func=lambda message: True)  # Обрабатываем все типы сообщений
+# def handle_all_messages(message):
+#     # Отправляем ответ для подтверждения получения сообщения
+#     bot.send_message(message.chat.id, "Ваше сообщение получено! Удаляю...")
+#
+#     # Удаляем сообщение пользователя
+#     try:
+#         bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+#     except Exception as e:
+#         print(f"Ошибка при удалении сообщения: {e}")
 
 # ОТПРАВКА СООБЩЕНИЙ АДМИНИСТРАТОРУ
 @bot.message_handler(content_types=['document'])
@@ -426,6 +552,15 @@ def doc(message):
     if message.document:
         bot.send_document(admin[0], message.document.file_id, caption=f'Сдал отчет @{message.from_user.username}')
 
+
+# @bot.message_handler(func=lambda call: call.data in ['order'])
+# def send_order(call):
+#     cur.execute(f"""SELECT * FROM basket WHERE user_id = '{call.message.from_user.id}'""")
+#     bouqs = cur.fetchall()
+#     message_text = order_text(bouqs, call.message.from_user.username)
+#     print(1)
+#     if bouqs:
+#         bot.send_message(admin[0], message_text)
 
 # Запускаем бота
 if __name__ == '__main__':
