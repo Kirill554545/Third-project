@@ -15,7 +15,6 @@ conn = psycopg2.connect(
 
 cur = conn.cursor()
 
-# Создаем бота с вашим токеном
 bot = telebot.TeleBot("7611122835:AAGaBz-4CLeVhn6j_QY3S7JwHmsnaiVrzoc")
 
 admin = [1078189371]
@@ -81,8 +80,6 @@ forward = InlineKeyboardButton("->", callback_data='forward')
 back = InlineKeyboardButton("<-", callback_data='back')
 choose = InlineKeyboardButton("В корзину", callback_data="choose")
 
-
-# bck_to_start = InlineKeyboardButton("Назад", callback_data='back_to_start')
 
 
 # ПРОВЕРКА ВАЛИДНОСТИ
