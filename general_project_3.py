@@ -4,6 +4,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMedia
 import psycopg2
 import re
 import os
+import json
 
 conn = psycopg2.connect(
     dbname="projectdb",
@@ -15,6 +16,7 @@ conn = psycopg2.connect(
 
 cur = conn.cursor()
 
+# Создаем бота с вашим токеном
 bot = telebot.TeleBot("7611122835:AAGaBz-4CLeVhn6j_QY3S7JwHmsnaiVrzoc")
 
 admin = [1078189371]
@@ -22,7 +24,6 @@ admin = [1078189371]
 SAVE_DIR = 'data'
 os.makedirs(SAVE_DIR, exist_ok=True)
 user_info = {}
-users = {}
 current_bouqet_id = 0
 orders_list = []
 
@@ -80,6 +81,10 @@ forward = InlineKeyboardButton("->", callback_data='forward')
 back = InlineKeyboardButton("<-", callback_data='back')
 choose = InlineKeyboardButton("В корзину", callback_data="choose")
 
+# Открываем файл и загружаем его содержимое
+with open('users.json', 'r') as file:
+    data = json.load(file)
+    json_users = list(data.keys())
 
 
 # ПРОВЕРКА ВАЛИДНОСТИ
@@ -121,6 +126,7 @@ def return_first(a):
 def bouqet_id(a):
     return a[1]
 
+
 # ФУНКЦИЯ СОЗДАНИЯ ТЕКСТА ДЛЯ КОРЗИНЫ ПОЛЬЗВАТЕЛЯ
 def basket_text(sp):
     text_for_basket = '🛒Корзина\n\n🌷Букеты:\n\n'
@@ -138,6 +144,7 @@ def basket_text(sp):
     text_for_basket += f'Итого: {summa}'
     return text_for_basket
 
+
 # ФУНКЦИЯ СОЗДАНИЯ ТЕКСТА ЗАКАЗА ДЛЯ ОТОБРАЖЕНИЯ
 def order_text(sp, username):
     text = f'''Пользователь: @{username}\n\nЗаказ:\n\n'''
@@ -154,27 +161,38 @@ def order_text(sp, username):
     text += f'Итого: {summa}'
     return text
 
+
 # СОЗДАНИЕ СЛОВАРЯ ПОЛЬЗОВАТЕЛЕЙ, ДЛЯ ХРАНЕНИЯ ВРЕМЕННЫХ ПЕРЕМЕННЫХ
-def make_sl(us_id):
-    users[us_id] = {}
-    users[us_id]['wait_message_profile'] = False
-    users[us_id]['wait_message_add_bouqet'] = False
-    users[us_id]['download_photo'] = False
-    users[us_id]['profile_message_data'] = []
-    users[us_id]['add_bouqets_message_data'] = []
-    users[us_id]['click_count'] = 0
-    users[us_id]['page_count'] = 1
+def make_json_user(us_id):
+    data[str(us_id)] = {}
+    data[str(us_id)]['wait_message_profile'] = False
+    data[str(us_id)]['wait_message_add_bouqet'] = False
+    data[str(us_id)]['download_photo'] = False
+    data[str(us_id)]['profile_message_data'] = []
+    data[str(us_id)]['add_bouqets_message_data'] = []
+    data[str(us_id)]['click_count'] = 0
+    data[str(us_id)]['page_count'] = 1
+    data[str(us_id)]['access'] = False
+    file = open('users.json', 'w')
+    json.dump(data, file, indent=4)
+
+
+def save_to_json():
+    file = open('users.json', 'w')
+    json.dump(data, file, indent=4)
+
 
 # СОЗДАНИЕ СПИСКА ЗАКАЗОВ В ВИДЕ КЛАВИАТУРЫ
 def make_orders_list(idu, lst):
     sp = []
-    start = (users[idu]['page_count'] - 1) * 10
-    finish = users[idu]['page_count'] * 10
+    start = (data[str(idu)]['page_count'] - 1) * 10
+    finish = data[str(idu)]['page_count'] * 10
     for i in range(len(lst[start: finish + 1])):
         button = InlineKeyboardButton(f"Заказ {i + 1}", callback_data=lst[i])
         sp.append([button])
     print(sp)
     return sp
+
 
 # ФУНКЦИЯ ТРАНСФОРМАЦИИ КОРТЕЖА В СПИСОК ДЛЯ CALLBACK_DATA
 def make_string(a):
@@ -187,8 +205,7 @@ def start(message):
     cur.execute(f"""INSERT INTO users (user_id) VALUES ({message.chat.id}) ON CONFLICT (user_id) DO NOTHING;""")
     cur.execute('''SELECT role FROM users WHERE user_id = %s''', (message.chat.id,))
     role = cur.fetchone()[0]
-    if message.chat.id not in users.keys():
-        make_sl(message.chat.id)
+    make_json_user(message.chat.id)
     button1 = InlineKeyboardButton("Готовые букеты", callback_data='bouquets')
     button2 = InlineKeyboardButton("Корзина", callback_data='basket')
     button3 = InlineKeyboardButton("Профиль", callback_data='profile')
@@ -228,6 +245,7 @@ def orders(call):
     bot.delete_message(call.message.chat.id, message_id=call.message.message_id)
     bot.send_message(idu, 'Список заказов', reply_markup=keyboard_1)
 
+
 # ОТКРЫТЬ ЗАКАЗ
 @bot.callback_query_handler(func=lambda call: call.data in orders_list)
 def open_order(call):
@@ -238,6 +256,7 @@ def open_order(call):
     keyboard = InlineKeyboardMarkup([[back_to_order_list_button]])
     text = order_text(bouqets_id.split(';'), call.from_user.username)
     bot.send_message(call.message.chat.id, text, reply_markup=keyboard)
+
 
 # ВОЗВРАТ К СПИСКУ ЗАКАЗОВ
 @bot.callback_query_handler(func=lambda call: call.data in ['back_to_order_list'])
@@ -255,10 +274,11 @@ def handle_first_buttons(call):
     cur.execute('''SELECT * FROM bouqets''')
     bouqets = cur.fetchall()
     bot.delete_message(call.message.chat.id, call.message.message_id)
-    users[call.message.chat.id]['click_count'] = 0
+    data[str(call.message.chat.id)]['click_count'] = 0
+    save_to_json()
     if bouqets:
-        info = return_text_about_bouqet(bouqets[users[call.message.chat.id]['click_count']])
-        current_bouqet_id = bouqets[users[call.message.chat.id]['click_count']][0]
+        info = return_text_about_bouqet(bouqets[data[str(call.message.chat.id)]['click_count']])
+        current_bouqet_id = bouqets[data[str(call.message.chat.id)]['click_count']][0]
         showcase_keyboard = [[back, choose, forward], [back_to_start_button]]
         if role in [2, 3]:
             showcase_keyboard.append([delete_bouqet_button])
@@ -297,14 +317,15 @@ def profile_open(call):
     user_info = cur.fetchone()
     profile_text = f"""Профиль\n\nИмя: {user_info[1]}\n\nНомер телефона: {user_info[2]}\n\nЭлектронная почта: {user_info[0]}\n\nАдрес доставки: {user_info[3]}"""
     msg = bot.send_message(call.message.chat.id, profile_text, reply_markup=profile_keyboard)
-    users[call.message.chat.id]['profile_message_data'] = []
-    users[call.message.chat.id]['profile_message_data'].append(msg.message_id)
+    data[str(call.message.chat.id)]['profile_message_data'] = []
+    data[str(call.message.chat.id)]['profile_message_data'].append(msg.message_id)
+    save_to_json()
 
 
 # ДОБАВЛЕНИЕ БУКЕТА В КОРЗИНУ
 @bot.callback_query_handler(func=lambda call: call.data in ['choose'])
 def add_to_basket(call):
-    bouqet_id = bouqets[users[call.message.chat.id]['click_count']][0]
+    bouqet_id = bouqets[data[str(call.message.chat.id)]['click_count']][0]
     user_id = call.message.chat.id
     cur.execute(f"""SELECT bouqet_id FROM basket WHERE user_id = '{user_id}'""")
     bouqets_id = list(map(return_first, cur.fetchall()))
@@ -325,40 +346,42 @@ def add_to_basket(call):
 @bot.callback_query_handler(func=lambda call: call.data in profile_button_texts)
 def change(call):
     global profile_button_texts, type_message
-    users[call.message.chat.id]['wait_message_profile'] = True
+    data[str(call.message.chat.id)]['wait_message_profile'] = True
     bot.answer_callback_query(call.id)
-    for el in range(1, len(users[call.message.chat.id]['profile_message_data'])):
+    for el in range(1, len(data[str(call.message.chat.id)]['profile_message_data'])):
         bot.delete_message(chat_id=call.message.chat.id,
-                           message_id=users[call.message.chat.id]['profile_message_data'][el])
-    users[call.message.chat.id]['profile_message_data'] = [users[call.message.chat.id]['profile_message_data'][0]]
+                           message_id=data[str(call.message.chat.id)]['profile_message_data'][el])
+    data[str(call.message.chat.id)]['profile_message_data'] = [
+        data[str(call.message.chat.id)]['profile_message_data'][0]]
     bck_to_profile = InlineKeyboardButton("Назад", callback_data="back_to_profile")
     keyboard = [[bck_to_profile]]
     new_keyboard = InlineKeyboardMarkup(keyboard)
     msg_1 = bot.send_message(call.message.chat.id,
                              f"Теперь вы можете отправить {' '.join(call.json['data'].split()[1:])}",
                              reply_markup=new_keyboard)
-    users[call.message.chat.id]['profile_message_data'].append(msg_1.message_id)
+    data[str(call.message.chat.id)]['profile_message_data'].append(msg_1.message_id)
+    save_to_json()
     bot.register_next_step_handler(call.message, chn)
     type_message = profile_button_texts.index(call.json['data'])
 
 
-def chn(message: telebot.types.Message):
+def chn(message):
     global profile_keyboard, type_message, answer, sql_request
-    access = False
-    if message.chat.id in users.keys() and users[message.chat.id]['wait_message_profile']:
-        users[message.chat.id]['wait_message_profile'] = False
+    if str(message.chat.id) in json_users:
+        data[str(message.chat.id)]['wait_message_profile'] = False
+        save_to_json()
         if type_message == 0:
             if is_valid_name(message.text):
-                access = True
+                data[str(message.chat.id)]['access'] = True
         elif type_message == 1:
             if is_valid_phone_number(message.text):
-                access = True
+                data[str(message.chat.id)]['access'] = True
         elif type_message == 2:
             if is_valid_email(message.text):
-                access = True
+                data[str(message.chat.id)]['access'] = True
         elif type_message == 3:
-            access = True
-        if access:
+            data[str(message.chat.id)]['access'] = True
+        if data[str(message.chat.id)]['access']:
             ans = bot.send_message(message.chat.id, answer[type_message])
             cur.execute(f"""UPDATE users SET {sql_request[type_message]} = %s WHERE user_id = %s""",
                         (message.text, message.chat.id))
@@ -369,18 +392,19 @@ def chn(message: telebot.types.Message):
             user_info = cur.fetchone()
             profile_text = f"""Профиль\n\nИмя: {user_info[0]}\n\nНомер телефона: {user_info[1]}\n\nЭлектронная почта: {user_info[2]}\n\nАдрес доставки: {user_info[3]}"""
             bot.edit_message_text(text=profile_text, chat_id=message.chat.id,
-                                  message_id=users[message.chat.id]['profile_message_data'][0],
+                                  message_id=data[str(message.chat.id)]['profile_message_data'][0],
                                   reply_markup=profile_keyboard)
-            users[message.chat.id]['wait_message_profile'] = False
-            access = False
+            data[str(message.chat.id)]['wait_message_profile'] = False
+            data[str(message.chat.id)]['access'] = False
         else:
             ans = bot.send_message(message.chat.id, "Неверный формат ввода.\nПопробуйте еще раз.")
-            users[message.chat.id]['wait_message_profile'] = False
+            data[str(message.chat.id)]['wait_message_profile'] = False
         time.sleep(2)
-        bot.delete_message(chat_id=message.chat.id, message_id=users[message.chat.id]['profile_message_data'][1])
+        bot.delete_message(chat_id=message.chat.id, message_id=data[str(message.chat.id)]['profile_message_data'][1])
         bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
         bot.delete_message(chat_id=message.chat.id, message_id=ans.message_id)
-        users[message.chat.id]['profile_message_data'] = [users[message.chat.id]['profile_message_data'][0]]
+        data[str(message.chat.id)]['profile_message_data'] = [data[str(message.chat.id)]['profile_message_data'][0]]
+        save_to_json()
 
 
 # ОСНОВНЫЕ ДЕЙСТВИЯ С КНОПКАМИ
@@ -396,9 +420,11 @@ def handle_second_buttons(call):
 # ВОЗВРАТ К ПРОФИЛЮ
 @bot.callback_query_handler(func=lambda call: call.data == 'back_to_profile')
 def back_profile(call):
-    for el in users[call.message.chat.id]['profile_message_data'][1:]:
+    for el in data[str(call.message.chat.id)]['profile_message_data'][1:]:
         bot.delete_message(call.message.chat.id, message_id=el)
-    users[call.message.chat.id]['profile_message_data'] = [users[call.message.chat.id]['profile_message_data'][0]]
+    data[str(call.message.chat.id)]['profile_message_data'] = [
+        data[str(call.message.chat.id)]['profile_message_data'][0]]
+    save_to_json()
     bot.delete_message(call.message.chat.id, call.message.message_id)
     profile_open(call)
 
@@ -409,12 +435,13 @@ def back_change(call):
     global temporary_data
     if temporary_data:
         save_photo(*temporary_data)
-    users[call.message.chat.id]['wait_message_add_bouqet'] = False
-    users[call.message.chat.id]['download_photo'] = False
-    for message in users[call.message.chat.id]['add_bouqets_message_data'][1:]:
+    data[str(call.message.chat.id)]['wait_message_add_bouqet'] = False
+    data[str(call.message.chat.id)]['download_photo'] = False
+    for message in data[str(call.message.chat.id)]['add_bouqets_message_data'][1:]:
         bot.delete_message(call.message.chat.id, message)
-    users[call.message.chat.id]['add_bouqets_message_data'] = [
-        users[call.message.chat.id]['add_bouqets_message_data'][0]]
+    data[str(call.message.chat.id)]['add_bouqets_message_data'] = [
+        data[str(call.message.chat.id)]['add_bouqets_message_data'][0]]
+    save_to_json()
 
 
 # СОХРАНЕНИЕ БУКЕТА
@@ -433,7 +460,7 @@ def save_bouqet(call):
     temporary_data = []
     text_bouqets = return_bouqet_text(new_bouqet)
     bot.edit_message_text(text_bouqets, chat_id=call.message.chat.id,
-                          message_id=users[call.message.chat.id]['add_bouqets_message_data'][0],
+                          message_id=data[call.message.chat.id]['add_bouqets_message_data'][0],
                           reply_markup=bouqets_keyboard)
 
 
@@ -442,23 +469,23 @@ def save_bouqet(call):
 def forward_back_buttons(call):
     global bouqets, role, current_bouqet_id
     edit = False
-    if call.data == 'forward' and users[call.message.chat.id]['click_count'] < len(bouqets) - 1:
-        users[call.message.chat.id]['click_count'] += 1
+    if call.data == 'forward' and data[str(call.message.chat.id)]['click_count'] < len(bouqets) - 1:
+        data[str(call.message.chat.id)]['click_count'] += 1
         edit = True
-    elif call.data == 'back' and users[call.message.chat.id]['click_count'] > 0:
-        users[call.message.chat.id]['click_count'] -= 1
+    elif call.data == 'back' and data[str(call.message.chat.id)]['click_count'] > 0:
+        data[str(call.message.chat.id)]['click_count'] -= 1
         edit = True
+    save_to_json()
     if edit:
         showcase_keyboard = [[back, choose, forward], [back_to_start_button]]
         if role in [2, 3]:
             showcase_keyboard.append([delete_bouqet_button])
         new_keyboard = InlineKeyboardMarkup(showcase_keyboard)
-        info = return_text_about_bouqet(bouqets[users[call.message.chat.id]['click_count']])
-        current_bouqet_id = bouqets[users[call.message.chat.id]['click_count']][0]
+        info = return_text_about_bouqet(bouqets[data[str(call.message.chat.id)]['click_count']])
+        current_bouqet_id = bouqets[data[str(call.message.chat.id)]['click_count']][0]
         with open(info[1], 'rb') as new_photo:
             bot.edit_message_media(media=InputMediaPhoto(new_photo, caption=info[0]), chat_id=call.message.chat.id,
                                    message_id=call.message.message_id, reply_markup=new_keyboard)
-        edit = False
 
 
 # ОТКРЫТИЕ КОРЗИНЫ
@@ -499,8 +526,9 @@ def add_bouq(call):
     bot.delete_message(call.message.chat.id, call.message.message_id)
     text_bouqets = return_bouqet_text(new_bouqet)
     msg = bot.send_message(call.message.chat.id, text_bouqets, reply_markup=bouqets_keyboard)
-    users[call.message.chat.id]['add_bouqets_message_data'] = []
-    users[call.message.chat.id]['add_bouqets_message_data'].append(msg.message_id)
+    data[str(call.message.chat.id)]['add_bouqets_message_data'] = []
+    data[str(call.message.chat.id)]['add_bouqets_message_data'].append(msg.message_id)
+    save_to_json()
 
 
 # ВЫБОР ПАРАМЕТРА ИЗМЕНЕНИЯ У БУКЕТА
@@ -512,60 +540,65 @@ def change_1(call):
     msg_2 = bot.send_message(call.message.chat.id,
                              f"Теперь вы можете отправить {' '.join(call.json['data'].split()[1:])}",
                              reply_markup=new_keyboard_b)
-    users[call.message.chat.id]['add_bouqets_message_data'].append(msg_2.message_id)
+    data[str(call.message.chat.id)]['add_bouqets_message_data'].append(msg_2.message_id)
     type_message_2 = add_bouqet_button_text.index(call.json['data'])
     if type_message_2 in [0, 2, 3]:
-        users[call.message.chat.id]['wait_message_add_bouqet'] = True
+        data[str(call.message.chat.id)]['wait_message_add_bouqet'] = True
         bot.register_next_step_handler(call.message, text_changes)
     else:
         if new_bouqet['ready'] is True:
             new_bouqet[sql_request_b[1]].clear()
             new_bouqet['ready'] = False
-        users[call.message.chat.id]['download_photo'] = True
+        data[str(call.message.chat.id)]['download_photo'] = True
         bot.register_next_step_handler(call.message, handle_photo)
+    save_to_json()
 
 
 # ОБРАБОТКА ТЕКСТОВЫХ ПАРАМЕТРОВ У БУКЕТА
 @bot.message_handler(content_types=['message'])
 def text_changes(message: telebot.types.Message):
     global bouqets_keyboard, answer_b, sql_request_b, type_message_2, new_bouqet
-    if users[message.chat.id]['wait_message_add_bouqet']:
-        users[message.chat.id]['wait_message_add_bouqet'] = False
-        users[message.chat.id]['add_bouqets_message_data'].append(message.message_id)
+    if data[str(message.chat.id)]['wait_message_add_bouqet']:
+        data[str(message.chat.id)]['wait_message_add_bouqet'] = False
+        data[str(message.chat.id)]['add_bouqets_message_data'].append(message.message_id)
         new_bouqet[sql_request_b[type_message_2]] = message.text
         text_bouqets = return_bouqet_text(new_bouqet)
         ans_b = bot.send_message(message.chat.id, answer_b[type_message_2])
-        users[message.chat.id]['add_bouqets_message_data'].append(ans_b.message_id)
+        data[str(message.chat.id)]['add_bouqets_message_data'].append(ans_b.message_id)
         bot.edit_message_text(text_bouqets, chat_id=message.chat.id,
-                              message_id=users[message.chat.id]['add_bouqets_message_data'][0],
+                              message_id=data[str(message.chat.id)]['add_bouqets_message_data'][0],
                               reply_markup=bouqets_keyboard)
         time.sleep(2)
-        for el in users[message.chat.id]['add_bouqets_message_data'][1:]:
+        for el in data[str(message.chat.id)]['add_bouqets_message_data'][1:]:
             bot.delete_message(message.chat.id, el)
-        users[message.chat.id]['add_bouqets_message_data'] = [users[message.chat.id]['add_bouqets_message_data'][0]]
+        data[str(message.chat.id)]['add_bouqets_message_data'] = [
+            data[str(message.chat.id)]['add_bouqets_message_data'][0]]
+    save_to_json()
 
 
 # ОБРАБОТКА ФОТОГРАФИЙ ДЛЯ БУКЕТА
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     global new_bouqet, temporary_data
-    if users[message.chat.id]['download_photo']:
+    if data[str(message.chat.id)]['download_photo']:
         if len(temporary_data) < 1:
             temporary_data.append(message.photo[-1])
-            users[message.chat.id]['add_bouqets_message_data'].append(message.message_id)
+            data[str(message.chat.id)]['add_bouqets_message_data'].append(message.message_id)
         if len(temporary_data) == 1:
-            users[message.chat.id]['download_photo'] = False
+            data[str(message.chat.id)]['download_photo'] = False
             save_photo(*temporary_data[len(new_bouqet[sql_request_b[1]]):])
             temporary_data = []
             ans_b = bot.send_message(message.chat.id, answer_b[1])
-            users[message.chat.id]['add_bouqets_message_data'].append(ans_b.message_id)
-            for el in users[message.chat.id]['add_bouqets_message_data'][1:]:
+            data[str(message.chat.id)]['add_bouqets_message_data'].append(ans_b.message_id)
+            for el in data[str(message.chat.id)]['add_bouqets_message_data'][1:]:
                 bot.delete_message(message.chat.id, el)
-            users[message.chat.id]['add_bouqets_message_data'] = [users[message.chat.id]['add_bouqets_message_data'][0]]
+            data[str(message.chat.id)]['add_bouqets_message_data'] = [
+                data[str(message.chat.id)]['add_bouqets_message_data'][0]]
         text_bouqets = return_bouqet_text(new_bouqet)
         bot.edit_message_text(text_bouqets, chat_id=message.chat.id,
-                              message_id=users[message.chat.id]['add_bouqets_message_data'][0],
+                              message_id=data[str(message.chat.id)]['add_bouqets_message_data'][0],
                               reply_markup=bouqets_keyboard)
+        save_to_json()
     else:
         bot.delete_message(message.chat.id, message.message_id)
 
@@ -586,7 +619,7 @@ def save_photo(*file_info):
 # УДАЛЕНИЕ ЛЮБЫХ СООБЩЕНИЙ, КОТОРЫЕ НЕ ЖДАЛ БОТ
 @bot.message_handler(content_types=message_types)
 def echo_message(message):
-    if not users[message.chat.id]['wait_message_profile'] and not users[message.chat.id]['download_photo']:
+    if not data[str(message.chat.id)]['wait_message_profile'] and not data[str(message.chat.id)]['download_photo']:
         bot.delete_message(chat_id=message.chat.id, message_id=message.id)
 
 
