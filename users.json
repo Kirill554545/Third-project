@@ -1,0 +1,35 @@
+{
+    "1078189371": {
+        "wait_message_profile": false,
+        "wait_message_add_bouqet": false,
+        "download_photo": false,
+        "profile_message_data": [],
+        "add_bouqets_message_data": [],
+        "current_order": "",
+        "click_count": 0,
+        "page_count": 1,
+        "access": false
+    },
+    "2080424139": {
+        "wait_message_profile": false,
+        "wait_message_add_bouqet": false,
+        "download_photo": false,
+        "profile_message_data": [],
+        "add_bouqets_message_data": [],
+        "click_count": 0,
+        "page_count": 1,
+        "access": false
+    },
+    "755085974": {
+        "wait_message_profile": false,
+        "wait_message_add_bouqet": false,
+        "download_photo": false,
+        "profile_message_data": [
+            4260
+        ],
+        "add_bouqets_message_data": [],
+        "click_count": 0,
+        "page_count": 1,
+        "access": false
+    }
+}

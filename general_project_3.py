@@ -33,7 +33,7 @@ back_to_order_list_button = InlineKeyboardButton('Назад', callback_data="ba
 p_keyboard = []
 profile_button_texts = ['Изменить имя', 'Изменить номер телефона', 'Изменить электронную почту',
                         'Изменить адрес доставки']
-sql_request = ['username', 'user_phone_number', 'email', 'delivery_address']
+sql_request = ['first_name', 'user_phone_number', 'email', 'delivery_address']
 answer = ['Ваше имя успешно изменено', 'Ваш номер телефона успешно изменен', 'Ваша электронная почта успешно изменена',
           'Адрес доставки успешно изменен']
 request_text = ['Ваше имя', 'Ваш номер телефона', 'Вашу электронную почту', 'адрес доставки']
@@ -63,6 +63,15 @@ message_types = [
     "shipping_query",
     "pre_checkout_query"
 ]
+
+
+greetings_text = '''"Наши Цветы" - Ваш надежный партнер в мире флористики!\n\n
+📌 Оптовая и розничная продажа срезанных цветов сопутствующих товаров
+📌 Упаковка подарков
+📌 Воздушные шары
+📌 Ландшафтный дизайн\n\n
+Наши контакты: тел. 55-45-45\n\nНаш телеграм канал: @NASHI_CVETY
+'''
 
 # СОЗДАНИЕ КЛАВИАТУР
 for i in profile_button_texts:
@@ -170,6 +179,7 @@ def make_json_user(us_id):
     data[str(us_id)]['download_photo'] = False
     data[str(us_id)]['profile_message_data'] = []
     data[str(us_id)]['add_bouqets_message_data'] = []
+    data[str(us_id)]['current_order'] = ''
     data[str(us_id)]['click_count'] = 0
     data[str(us_id)]['page_count'] = 1
     data[str(us_id)]['access'] = False
@@ -199,10 +209,12 @@ def make_string(a):
     return '.'.join(list(map(str, a)))
 
 
+
 # НАЧАЛЬНОЕ СООБЩЕНИЕ
 @bot.message_handler(commands=['start'])
 def start(message):
-    cur.execute(f"""INSERT INTO users (user_id) VALUES ({message.chat.id}) ON CONFLICT (user_id) DO NOTHING;""")
+    cur.execute(
+        f"""INSERT INTO users (user_id, username) VALUES ({message.chat.id}, '{message.chat.username}') ON CONFLICT (user_id) DO NOTHING;""")
     cur.execute('''SELECT role FROM users WHERE user_id = %s''', (message.chat.id,))
     role = cur.fetchone()[0]
     make_json_user(message.chat.id)
@@ -215,7 +227,8 @@ def start(message):
     if role in [2, 3]:
         keyboard.append([button4])
     keyboard = InlineKeyboardMarkup(keyboard)
-    bot.send_message(message.chat.id, 'Выберите кнопку:', reply_markup=keyboard)
+    with open('data/logo.jpg', 'rb') as photo:
+        bot.send_photo(message.chat.id, caption=greetings_text, photo=photo, reply_markup=keyboard)
     conn.commit()
 
 
@@ -250,11 +263,17 @@ def orders(call):
 @bot.callback_query_handler(func=lambda call: call.data in orders_list)
 def open_order(call):
     bot.delete_message(call.message.chat.id, message_id=call.message.message_id)
+    delete_order = InlineKeyboardButton("Удалить заказ", callback_data="delete_order")
     inf = call.data.split('.')
+    data[str(call.message.chat.id)]['current_order'] = int(inf[0])
+    save_to_json()
+    print(inf)
     cur.execute("""SELECT bouqets_id FROM orders WHERE id = %s AND user_id = %s""", (inf[0], inf[1]))
     bouqets_id = cur.fetchone()[0]
-    keyboard = InlineKeyboardMarkup([[back_to_order_list_button]])
-    text = order_text(bouqets_id.split(';'), call.from_user.username)
+    cur.execute("""SELECT username FROM users WHERE user_id = %s""", (inf[1],))
+    username = cur.fetchone()[0]
+    keyboard = InlineKeyboardMarkup([[delete_order], [back_to_order_list_button]])
+    text = order_text(bouqets_id.split(';'), username)
     bot.send_message(call.message.chat.id, text, reply_markup=keyboard)
 
 
@@ -265,13 +284,20 @@ def close_order(call):
     bot.delete_message(call.message.chat.id, message_id=call.message.message_id)
 
 
+@bot.callback_query_handler(func=lambda call: call.data in ['delete_order'])
+def delete_order_fn(call):
+    order_id = data[str(call.message.chat.id)]['current_order']
+    cur.execute(f"""DELETE FROM orders WHERE id = {order_id}""")
+    close_order(call)
+
+
 # ОТКРЫТИЕ ВИТРИНЫ С БУКЕТАМИ
 @bot.callback_query_handler(func=lambda call: call.data in ['bouquets'])
 def handle_first_buttons(call):
     global bouqets, role, current_bouqet_id
     cur.execute('''SELECT role FROM users WHERE user_id = %s''', (call.message.chat.id,))
     role = cur.fetchone()[0]
-    cur.execute('''SELECT * FROM bouqets''')
+    cur.execute('''SELECT * FROM bouqets WHERE bouqet_busy = 0''')
     bouqets = cur.fetchall()
     bot.delete_message(call.message.chat.id, call.message.message_id)
     data[str(call.message.chat.id)]['click_count'] = 0
@@ -323,6 +349,7 @@ def profile_open(call):
 
 
 # ДОБАВЛЕНИЕ БУКЕТА В КОРЗИНУ
+
 @bot.callback_query_handler(func=lambda call: call.data in ['choose'])
 def add_to_basket(call):
     bouqet_id = bouqets[data[str(call.message.chat.id)]['click_count']][0]
@@ -444,6 +471,7 @@ def back_change(call):
     save_to_json()
 
 
+
 # СОХРАНЕНИЕ БУКЕТА
 @bot.callback_query_handler(func=lambda call: call.data == 'Сохранить')
 def save_bouqet(call):
@@ -460,7 +488,7 @@ def save_bouqet(call):
     temporary_data = []
     text_bouqets = return_bouqet_text(new_bouqet)
     bot.edit_message_text(text_bouqets, chat_id=call.message.chat.id,
-                          message_id=data[call.message.chat.id]['add_bouqets_message_data'][0],
+                          message_id=data[str(call.message.chat.id)]['add_bouqets_message_data'][0],
                           reply_markup=bouqets_keyboard)
 
 
@@ -511,6 +539,7 @@ def send_order_function(call):
     if bouqs:
         bouqs_id = ';'.join([str(el[1]) for el in bouqs])
         msg = bot.send_message(admin[0], 'У Вас новый заказ!')
+        cur.execute(f"""UPDATE bouqets SET bouqet_busy = 1 WHERE id IN ({', '.join(bouqs_id.split(';'))})""")
         cur.execute(f"""INSERT INTO orders (user_id, bouqets_id) VALUES ('{user_id}', '{bouqs_id}')""")
         conn.commit()
         time.sleep(10)
@@ -555,6 +584,7 @@ def change_1(call):
 
 
 # ОБРАБОТКА ТЕКСТОВЫХ ПАРАМЕТРОВ У БУКЕТА
+
 @bot.message_handler(content_types=['message'])
 def text_changes(message: telebot.types.Message):
     global bouqets_keyboard, answer_b, sql_request_b, type_message_2, new_bouqet
@@ -614,6 +644,7 @@ def save_photo(*file_info):
         with open(file_path, 'wb') as new_file:
             new_file.write(downloaded_file)
             new_bouqet[sql_request_b[1]].append(file_path.split('\\')[1])
+
 
 
 # УДАЛЕНИЕ ЛЮБЫХ СООБЩЕНИЙ, КОТОРЫЕ НЕ ЖДАЛ БОТ
